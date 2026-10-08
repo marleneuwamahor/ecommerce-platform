@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import { AuthRequest } from "../middlewares/auth.middleware";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/user.model";
@@ -106,8 +105,14 @@ export const login = async (
     const jwtSecret = process.env.JWT_SECRET;
 
     if (!jwtSecret) {
-      throw new Error("JWT_SECRET is not defined");
+      res.status(500).json({
+        success: false,
+        message: "JWT secret is not configured",
+      });
+      return;
     }
+
+    const expiresIn = process.env.JWT_EXPIRES_IN || "1d";
 
     const token = jwt.sign(
       {
@@ -116,7 +121,7 @@ export const login = async (
       },
       jwtSecret,
       {
-        expiresIn: (process.env.JWT_EXPIRES_IN || "1d") as jwt.SignOptions["expiresIn"],
+        expiresIn: expiresIn as jwt.SignOptions["expiresIn"],
       }
     );
 
@@ -140,17 +145,16 @@ export const login = async (
     });
   }
 };
-export const getProfile = async (
-  req: AuthRequest,
+
+export const profile = async (
+  req: Request,
   res: Response
 ): Promise<void> => {
   try {
-    const user = await User.findById(req.user?.userId);
-
-    if (!user) {
-      res.status(404).json({
+    if (!req.user) {
+      res.status(401).json({
         success: false,
-        message: "User not found",
+        message: "Unauthorized",
       });
       return;
     }
@@ -158,14 +162,16 @@ export const getProfile = async (
     res.status(200).json({
       success: true,
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        role: req.user.role,
+        createdAt: req.user.createdAt,
+        updatedAt: req.user.updatedAt,
       },
     });
   } catch (error) {
-    console.error("Get profile error:", error);
+    console.error("Profile error:", error);
 
     res.status(500).json({
       success: false,

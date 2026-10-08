@@ -1,18 +1,22 @@
-import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import {
+  Request,
+  Response,
+  NextFunction,
+} from "express";
 
-export interface AuthRequest extends Request {
-  user?: {
-    userId: string;
-    role: "user" | "admin";
-  };
+import jwt from "jsonwebtoken";
+import User from "../models/user.model";
+
+interface JwtPayload {
+  userId: string;
+  role: "user" | "admin";
 }
 
-export const authenticate = (
-  req: AuthRequest,
+const authenticate = async (
+  req: Request,
   res: Response,
   next: NextFunction
-): void => {
+): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -26,27 +30,45 @@ export const authenticate = (
 
     const token = authHeader.split(" ")[1];
 
+    if (!token) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication token is required",
+      });
+      return;
+    }
+
     const jwtSecret = process.env.JWT_SECRET;
 
     if (!jwtSecret) {
-      throw new Error("JWT_SECRET is not defined");
+      res.status(500).json({
+        success: false,
+        message: "JWT secret is not configured",
+      });
+      return;
     }
 
-    const decoded = jwt.verify(token, jwtSecret) as {
-      userId: string;
-      role: "user" | "admin";
-    };
+    const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
 
-    req.user = {
-      userId: decoded.userId,
-      role: decoded.role,
-    };
+    const user = await User.findById(decoded.userId);
+
+    if (!user) {
+      res.status(401).json({
+        success: false,
+        message: "User no longer exists",
+      });
+      return;
+    }
+
+    req.user = user;
 
     next();
   } catch (error) {
     res.status(401).json({
       success: false,
-      message: "Invalid or expired authentication token",
+      message: "Invalid or expired token",
     });
   }
 };
+
+export default authenticate;
