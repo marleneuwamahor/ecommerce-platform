@@ -1,14 +1,5 @@
-import nodemailer from "nodemailer";
 import crypto from "crypto";
 import User from "../models/user.model";
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-});
 
 const hashCode = (code: string): string => {
   return crypto
@@ -33,42 +24,87 @@ export const sendVerificationEmail = async (
     verificationCodeExpires: expires,
   });
 
-  await transporter.sendMail({
-    from: `"E-Commerce Platform" <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: "Verify your email address",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
-        <h2>Welcome, ${name}!</h2>
+  const apiKey = process.env.BREVO_API_KEY;
+  const fromEmail = process.env.EMAIL_FROM;
+  const fromName = process.env.EMAIL_FROM_NAME || "E-Commerce Platform";
 
-        <p>
-          Thank you for creating an account with our E-Commerce Platform.
-        </p>
+  if (!apiKey) {
+    throw new Error("BREVO_API_KEY is not configured");
+  }
 
-        <p>
-          Please use the verification code below to verify your email address:
-        </p>
+  if (!fromEmail) {
+    throw new Error("EMAIL_FROM is not configured");
+  }
 
-        <div style="
-          background: #f4f4f4;
-          padding: 20px;
-          text-align: center;
-          font-size: 32px;
-          font-weight: bold;
-          letter-spacing: 8px;
-          margin: 20px 0;
-        ">
-          ${code}
-        </div>
+  const response = await fetch(
+    "https://api.brevo.com/v3/smtp/email",
+    {
+      method: "POST",
 
-        <p>
-          This verification code will expire in <strong>10 minutes</strong>.
-        </p>
+      headers: {
+        accept: "application/json",
+        "api-key": apiKey,
+        "content-type": "application/json",
+      },
 
-        <p>
-          If you did not create this account, you can safely ignore this email.
-        </p>
-      </div>
-    `,
-  });
+      body: JSON.stringify({
+        sender: {
+          name: fromName,
+          email: fromEmail,
+        },
+
+        to: [
+          {
+            email,
+            name,
+          },
+        ],
+
+        subject: "Verify your email address",
+
+        htmlContent: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
+            <h2>Welcome, ${name}!</h2>
+
+            <p>
+              Thank you for creating an account with our E-Commerce Platform.
+            </p>
+
+            <p>
+              Please use the verification code below to verify your email address:
+            </p>
+
+            <div style="
+              background: #f4f4f4;
+              padding: 20px;
+              text-align: center;
+              font-size: 32px;
+              font-weight: bold;
+              letter-spacing: 8px;
+              margin: 20px 0;
+            ">
+              ${code}
+            </div>
+
+            <p>
+              This verification code will expire in
+              <strong>10 minutes</strong>.
+            </p>
+
+            <p>
+              If you did not create this account, you can safely ignore this email.
+            </p>
+          </div>
+        `,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    throw new Error(
+      `Brevo email failed (${response.status}): ${errorText}`
+    );
+  }
 };
