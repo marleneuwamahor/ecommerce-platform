@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/user.model";
+import { sendPasswordResetEmail } from "../services/email.service";
+import crypto from "crypto";
 
 export const register = async (
   req: Request,
@@ -136,6 +138,128 @@ export const login = async (
     res.status(500).json({
       success: false,
       message: "Failed to login",
+    });
+  }
+};
+
+export const forgotPassword = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const email =
+      typeof req.body?.email === "string"
+        ? req.body.email.trim().toLowerCase()
+        : "";
+
+    if (!email) {
+      res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+      return;
+    }
+
+    const user = await User.findOne({ email });
+
+    if (user) {
+      try {
+        await sendPasswordResetEmail(
+          user._id.toString(),
+          user.email,
+          user.name
+        );
+      } catch (error) {
+        console.error("Password reset email error:", error);
+      }
+    }
+
+    // Use the same response whether or not the account exists.
+    res.status(200).json({
+      success: true,
+      message:
+        "If an account exists with that email, a password reset code will be sent.",
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to process your request",
+    });
+  }
+};
+
+export const resetPassword = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { email, code, newPassword } = req.body || {};
+
+    if (
+      typeof email !== "string" ||
+      typeof code !== "string" ||
+      typeof newPassword !== "string" ||
+      !email.trim() ||
+      !/^\d{6}$/.test(code) ||
+      newPassword.length < 6
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          "A valid email, six-digit reset code, and password of at least 6 characters are required",
+      });
+      return;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const hashedCode = crypto
+      .createHash("sha256")
+      .update(code)
+      .digest("hex");
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    const user = await User.findOneAndUpdate(
+      {
+        email: normalizedEmail,
+        resetPasswordCode: hashedCode,
+        resetPasswordExpires: { $gt: new Date() },
+      },
+      {
+        $set: {
+          password: hashedPassword,
+        },
+        $unset: {
+          resetPasswordCode: 1,
+          resetPasswordExpires: 1,
+        },
+      },
+      {
+        new: true,
+      }
+    );
+
+    if (!user) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid or expired password reset code",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successfully. Please log in with your new password.",
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to reset password",
     });
   }
 };
