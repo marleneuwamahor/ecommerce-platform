@@ -5,7 +5,7 @@ export interface IProduct extends Document {
   description: string;
   price: number;
   stock: number;
-  category?: string;
+  category?: mongoose.Types.ObjectId;
   imageUrl?: string;
   isActive: boolean;
   createdAt: Date;
@@ -45,8 +45,8 @@ const productSchema = new Schema<IProduct>(
     },
 
     category: {
-      type: String,
-      trim: true,
+      type: Schema.Types.ObjectId,
+      ref: "Category",
     },
 
     imageUrl: {
@@ -64,9 +64,19 @@ const productSchema = new Schema<IProduct>(
   }
 );
 
-productSchema.index({ name: "text", description: "text" });
-productSchema.index({ category: 1, isActive: 1 });
+productSchema.index({
+  name: "text",
+  description: "text",
+});
 
-const Product = mongoose.model<IProduct>("Product", productSchema);
+productSchema.index({
+  category: 1,
+  isActive: 1,
+});
+
+const Product = mongoose.model<IProduct>(
+  "Product",
+  productSchema
+);
 
 export default Product;

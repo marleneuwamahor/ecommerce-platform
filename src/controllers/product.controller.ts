@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
+
 import Product from "../models/product.model";
+import Category from "../models/category.model";
 
 export const createProduct = async (
   req: Request,
@@ -26,7 +28,20 @@ export const createProduct = async (
     ) {
       res.status(400).json({
         success: false,
-        message: "Name, description, price and stock are required",
+        message:
+          "Name, description, price and stock are required",
+      });
+      return;
+    }
+
+    if (
+      name.trim().length > 150 ||
+      description.trim().length > 5000
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Name or description exceeds the allowed length",
       });
       return;
     }
@@ -50,34 +65,47 @@ export const createProduct = async (
     ) {
       res.status(400).json({
         success: false,
-        message: "Stock must be a non-negative whole number",
-      });
-      return;
-    }
-
-    if (category !== undefined && typeof category !== "string") {
-      res.status(400).json({
-        success: false,
-        message: "Category must be a string",
-      });
-      return;
-    }
-
-    if (imageUrl !== undefined && typeof imageUrl !== "string") {
-      res.status(400).json({
-        success: false,
-        message: "Image URL must be a string",
+        message:
+          "Stock must be a non-negative whole number",
       });
       return;
     }
 
     if (
-      name.trim().length > 150 ||
-      description.trim().length > 5000
+      category !== undefined &&
+      (typeof category !== "string" ||
+        !mongoose.isValidObjectId(category))
     ) {
       res.status(400).json({
         success: false,
-        message: "Name or description exceeds the allowed length",
+        message: "Category must be a valid category ID",
+      });
+      return;
+    }
+
+    if (
+      category !== undefined &&
+      !(await Category.exists({
+        _id: category,
+        isActive: true,
+      }))
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Selected category does not exist or is inactive",
+      });
+      return;
+    }
+
+    if (
+      imageUrl !== undefined &&
+      (typeof imageUrl !== "string" ||
+        imageUrl.length > 2048)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Image URL must be a string of at most 2048 characters",
       });
       return;
     }
@@ -88,9 +116,11 @@ export const createProduct = async (
       price,
       stock,
       category:
-        typeof category === "string" ? category.trim() : undefined,
+        typeof category === "string" ? category : undefined,
       imageUrl:
-        typeof imageUrl === "string" ? imageUrl.trim() : undefined,
+        typeof imageUrl === "string"
+          ? imageUrl.trim()
+          : undefined,
     });
 
     res.status(201).json({
@@ -125,7 +155,8 @@ export const getProducts = async (
     ) {
       res.status(400).json({
         success: false,
-        message: "Page must be positive and limit must be between 1 and 100",
+        message:
+          "Page must be positive and limit must be between 1 and 100",
       });
       return;
     }
@@ -134,17 +165,54 @@ export const getProducts = async (
       isActive: true,
     };
 
-    if (typeof req.query.category === "string" && req.query.category.trim()) {
-      filter.category = req.query.category.trim();
+    if (
+      typeof req.query.category === "string" &&
+      req.query.category.trim()
+    ) {
+      const categoryId = req.query.category.trim();
+
+      if (!mongoose.isValidObjectId(categoryId)) {
+        res.status(400).json({
+          success: false,
+          message: "Invalid category ID",
+        });
+        return;
+      }
+
+      const categoryExists = await Category.exists({
+        _id: categoryId,
+        isActive: true,
+      });
+
+      if (!categoryExists) {
+        res.status(200).json({
+          success: true,
+          products: [],
+          pagination: {
+            page,
+            limit,
+            total: 0,
+            totalPages: 0,
+          },
+        });
+        return;
+      }
+
+      filter.category = new mongoose.Types.ObjectId(categoryId);
     }
 
-    if (typeof req.query.search === "string" && req.query.search.trim()) {
-      const search = req.query.search.trim().slice(0, 100);
-      filter.$text = { $search: search };
+    if (
+      typeof req.query.search === "string" &&
+      req.query.search.trim()
+    ) {
+      filter.$text = {
+        $search: req.query.search.trim().slice(0, 100),
+      };
     }
 
     const [products, total] = await Promise.all([
       Product.find(filter)
+        .populate("category", "name description")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit),
@@ -190,7 +258,7 @@ export const getProductById = async (
     const product = await Product.findOne({
       _id: id,
       isActive: true,
-    });
+    }).populate("category", "name description");
 
     if (!product) {
       res.status(404).json({
@@ -263,7 +331,8 @@ export const updateProduct = async (
     ) {
       res.status(400).json({
         success: false,
-        message: "Name must be a non-empty string of at most 150 characters",
+        message:
+          "Name must be a non-empty string of at most 150 characters",
       });
       return;
     }
@@ -276,7 +345,8 @@ export const updateProduct = async (
     ) {
       res.status(400).json({
         success: false,
-        message: "Description must be a non-empty string of at most 5000 characters",
+        message:
+          "Description must be a non-empty string of at most 5000 characters",
       });
       return;
     }
@@ -302,29 +372,47 @@ export const updateProduct = async (
     ) {
       res.status(400).json({
         success: false,
-        message: "Stock must be a non-negative whole number",
+        message:
+          "Stock must be a non-negative whole number",
       });
       return;
     }
 
     if (
       updates.category !== undefined &&
-      typeof updates.category !== "string"
+      (typeof updates.category !== "string" ||
+        !mongoose.isValidObjectId(updates.category))
     ) {
       res.status(400).json({
         success: false,
-        message: "Category must be a string",
+        message: "Category must be a valid category ID",
+      });
+      return;
+    }
+
+    if (
+      typeof updates.category === "string" &&
+      !(await Category.exists({
+        _id: updates.category,
+        isActive: true,
+      }))
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Selected category does not exist or is inactive",
       });
       return;
     }
 
     if (
       updates.imageUrl !== undefined &&
-      typeof updates.imageUrl !== "string"
+      (typeof updates.imageUrl !== "string" ||
+        updates.imageUrl.length > 2048)
     ) {
       res.status(400).json({
         success: false,
-        message: "Image URL must be a string",
+        message: "Image URL must be a string of at most 2048 characters",
       });
       return;
     }
@@ -348,10 +436,6 @@ export const updateProduct = async (
       updates.description = updates.description.trim();
     }
 
-    if (typeof updates.category === "string") {
-      updates.category = updates.category.trim();
-    }
-
     if (typeof updates.imageUrl === "string") {
       updates.imageUrl = updates.imageUrl.trim();
     }
@@ -363,7 +447,7 @@ export const updateProduct = async (
         new: true,
         runValidators: true,
       }
-    );
+    ).populate("category", "name description");
 
     if (!product) {
       res.status(404).json({
@@ -403,7 +487,6 @@ export const deleteProduct = async (
       return;
     }
 
-    // Soft-delete the product so existing order references can be preserved.
     const product = await Product.findByIdAndUpdate(
       id,
       { $set: { isActive: false } },
