@@ -3,13 +3,12 @@ import {
   Response,
   NextFunction,
 } from "express";
-
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import User from "../models/user.model";
 
 interface JwtPayload {
   userId: string;
-  role: "user" | "admin";
 }
 
 const authenticate = async (
@@ -28,7 +27,7 @@ const authenticate = async (
       return;
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.slice(7);
 
     if (!token) {
       res.status(401).json({
@@ -50,6 +49,17 @@ const authenticate = async (
 
     const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
 
+    if (
+      typeof decoded.userId !== "string" ||
+      !mongoose.isValidObjectId(decoded.userId)
+    ) {
+      res.status(401).json({
+        success: false,
+        message: "Invalid authentication token",
+      });
+      return;
+    }
+
     const user = await User.findById(decoded.userId);
 
     if (!user) {
@@ -60,10 +70,17 @@ const authenticate = async (
       return;
     }
 
-    req.user = user;
+    if (!user.isActive) {
+      res.status(403).json({
+        success: false,
+        message: "Your account has been deactivated",
+      });
+      return;
+    }
 
+    req.user = user;
     next();
-  } catch (error) {
+  } catch {
     res.status(401).json({
       success: false,
       message: "Invalid or expired token",
@@ -80,7 +97,7 @@ export const authorize = (...allowedRoles: Array<"user" | "admin">) => {
     if (!req.user) {
       res.status(401).json({
         success: false,
-        message: "Unauthorized",
+        message: "Authentication required",
       });
       return;
     }
