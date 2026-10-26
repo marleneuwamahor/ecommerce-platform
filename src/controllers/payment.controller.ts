@@ -66,7 +66,11 @@ export const initiateCheckout = async (
       return;
     }
 
-    if (!order.items.length || order.total <= 0) {
+    if (
+      !order.items.length ||
+      !Number.isFinite(order.total) ||
+      order.total <= 0
+    ) {
       res.status(400).json({
         success: false,
         message: "This order cannot be paid",
@@ -124,8 +128,11 @@ export const initiateCheckout = async (
       (await response.json()) as PaypackCheckoutResponse;
 
     if (
-      !checkout.session_id ||
-      !checkout.payment_link ||
+      typeof checkout.session_id !== "string" ||
+      !checkout.session_id.trim() ||
+      typeof checkout.payment_link !== "string" ||
+      !checkout.payment_link.trim() ||
+      typeof checkout.amount !== "number" ||
       !Number.isFinite(checkout.amount) ||
       checkout.amount !== order.total
     ) {
@@ -138,8 +145,8 @@ export const initiateCheckout = async (
       return;
     }
 
-    // Reuse the existing payment record when retrying a failed or
-    // abandoned checkout for this order.
+    // Reuse an existing payment record when retrying a failed
+    // or abandoned checkout for this order.
     const payment = existingPayment
       ? await Payment.findByIdAndUpdate(
           existingPayment._id,
@@ -150,10 +157,15 @@ export const initiateCheckout = async (
               amount: order.total,
               currency: "RWF",
               status: "pending",
-              $unset: { paidAt: 1 },
+            },
+            $unset: {
+              paidAt: 1,
             },
           },
-          { new: true, runValidators: true }
+          {
+            new: true,
+            runValidators: true,
+          }
         )
       : await Payment.create({
           order: order._id,
@@ -166,12 +178,22 @@ export const initiateCheckout = async (
           status: "pending",
         });
 
+    if (!payment) {
+      console.error("Payment record could not be retrieved after checkout");
+
+      res.status(500).json({
+        success: false,
+        message: "Unable to save the payment session",
+      });
+      return;
+    }
+
     res.status(201).json({
       success: true,
       message: "Checkout session created",
       data: {
         orderId: order._id,
-        paymentId: payment?._id,
+        paymentId: payment._id,
         amount: order.total,
         currency: "RWF",
         status: "pending",
